@@ -1,9 +1,6 @@
 # EdgeHealth-ML
 
 **On-device multimodal activity recognition** — a lightweight vision-IMU fusion model for mobile health monitoring.
-
-Built to demonstrate alignment with HKUST MINSys Lab (Prof. Xiaomin Ouyang).
-
 ---
 
 ## 🏗️ Architecture

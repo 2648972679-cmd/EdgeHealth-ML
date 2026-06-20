@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Model checkpoints (too large, keep local only)
+checkpoints/*.pth
+checkpoints/*.onnx
+checkpoints/*.onnx.data
+
+# Dataset (too large, auto-downloaded)
+data/UCI_HAR_Dataset/
+data/har.zip
+data/*.zip
+
+# TensorBoard logs
+runs/
+
+# Virtual environment
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Screenshots
+*.png
+*.jpg
+
+# Dataset metadata files
+data/*.names
+data/UCI HAR Dataset.names
+
+# LaTeX aux files
+report/*.aux
+report/*.log
+report/*.out
+report/*.synctex*

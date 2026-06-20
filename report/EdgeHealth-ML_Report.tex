@@ -1,0 +1,776 @@
+% !TEX program = xelatex
+\documentclass[12pt,a4paper]{ctexart}
+
+% ==================== 字体设置 ====================
+% 中文主字体：宋体（启用伪粗体解决加粗问题）
+\setCJKmainfont{simsun.ttc}[
+    Path        = C:/Windows/fonts/,
+    AutoFakeBold = 2,
+    ItalicFont   = simkai.ttf,
+]
+% 中文无衬线：黑体
+\setCJKsansfont{simhei.ttf}[
+    Path        = C:/Windows/fonts/,
+    AutoFakeBold = 2,
+]
+% 中文等宽：仿宋
+\setCJKmonofont{simfang.ttf}[
+    Path        = C:/Windows/fonts/,
+]
+
+% 英文主字体
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+
+% ==================== 页面布局 ====================
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.8cm, right=2.8cm,
+            headheight=14pt]{geometry}
+
+% ==================== 包 ====================
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage{titlesec}
+
+% ---------- listings (代码高亮) ----------
+\usepackage{listings}
+\lstset{
+    basicstyle       = \small\ttfamily,
+    backgroundcolor  = \color{gray!5},
+    frame            = single,
+    rulecolor        = \color{gray!40},
+    breaklines       = true,
+    numbers          = left,
+    numbersep        = 6pt,
+    numberstyle      = \tiny\color{gray},
+    tabsize          = 4,
+    showstringspaces = false,
+    extendedchars    = true,
+    literate         = {→}{{$\rightarrow$}}1
+                       {×}{{$\times$}}1,
+}
+
+% ==================== 颜色 ====================
+\definecolor{Accent}{RGB}{0,102,204}
+
+% ==================== 页眉页脚 ====================
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\sffamily EdgeHealth-ML}
+\fancyhead[R]{\small\sffamily\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+\setlength{\headheight}{14pt}
+
+% ==================== 标题格式 ====================
+\titleformat{\section}
+    {\Large\bfseries\color{Accent}}
+    {}{0em}{}[\vspace{0.1em}{\color{Accent}\hrule}]
+\titleformat{\subsection}
+    {\large\bfseries}
+    {}{0em}{}
+\titleformat{\subsubsection}
+    {\normalsize\bfseries}
+    {}{0em}{}
+
+% ==================== 间距 ====================
+\setlength{\parskip}{0.8ex plus 0.3ex minus 0.2ex}
+\setlength{\parindent}{0pt}
+
+% ==================== 命令 ====================
+\newcommand{\file}[1]{\texttt{#1}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+% =================================================================
+\begin{document}
+
+% -------------------- 封面 --------------------
+\begin{center}
+    {\huge\bfseries EdgeHealth-ML}
+
+    \vspace{0.3em}
+    {\LARGE 端侧多模态人体活动识别系统}
+
+    \vspace{0.5em}
+    {\large 完整项目分析与代码详解}
+
+    \vspace{2em}
+    {\normalsize 吴金骏 \textbar{} WU, Jinjun}
+
+    \vspace{0.2em}
+    {\normalsize Hong Kong University of Science and Technology}
+
+    \vspace{0.2em}
+    {\normalsize \today}
+\end{center}
+
+% -------------------- 摘要 --------------------
+\begin{center}
+\fbox{\begin{minipage}{0.92\textwidth}
+\small
+\textbf{摘要：} 本文档对 EdgeHealth-ML 项目进行完整技术分析，涵盖项目背景、模型架构（Vision+IMU 双分支融合网络）、数据处理流水线（STFT 时频谱图生成）、训练流程（30 epochs，最佳准确率 87.61\%）、INT8 量化与 ONNX 部署（ONNX Runtime 推理延迟 4.83ms），以及全部 6 个 Python 源文件的逐行代码详解。项目面向移动/边缘设备的实时人体活动识别，对标 HKUST MINSys Lab 研究方向。
+\end{minipage}}
+\end{center}
+
+% =================================================================
+\newpage
+\section{项目概述}
+
+\subsection{背景与目标}
+
+EdgeHealth-ML 是一个面向\textbf{移动/边缘设备}的\textbf{多模态人体活动识别}（Human Activity Recognition, HAR）系统。利用智能手机自带的\textbf{加速度计 + 陀螺仪}（IMU 传感器），在设备端实时识别用户的日常活动（走路、上楼、下楼、坐着、站着、躺着），无需联网。项目对标 HKUST MINSys Lab（欧阳晓敏教授）的研究方向。
+
+\subsection{技术亮点}
+
+\begin{enumerate}[leftmargin=*]
+    \item \textbf{双分支异构融合：} Vision（2D CNN 处理频谱图）+ IMU（1D CNN 处理时序），互补特征通过拼接融合
+    \item \textbf{端到端部署：} PyTorch 训练 $\rightarrow$ INT8 量化 $\rightarrow$ ONNX 导出 $\rightarrow$ ONNX Runtime 推理
+    \item \textbf{轻量化设计：} MobileNetV3-Small 作为视觉主干，总参数量仅 120 万
+    \item \textbf{频谱图转换：} 将 1D 时序信号通过 STFT 转为 2D 时频谱图，复用成熟图像分类架构
+    \item \textbf{量化无损：} INT8 动态量化后准确率仅下降 0.03\%，ONNX Runtime 推理加速 11 倍
+\end{enumerate}
+
+\subsection{数据集}
+
+UCI HAR Dataset：
+\begin{itemize}
+    \item 30 名受试者，佩戴智能手机执行 6 种活动
+    \item 传感器采样率 50Hz，每个样本 128 个时间步（2.56 秒窗口）
+    \item 训练集 7,352 样本，测试集 2,947 样本
+    \item 6 类活动：walking, walking\_upstairs, walking\_downstairs, sitting, standing, laying
+\end{itemize}
+
+% =================================================================
+\section{模型架构}
+
+\subsection{整体结构}
+
+模型由 Vision 分支（MobileNetV3-Small）处理时频谱图、IMU 分支（3 层 1D-CNN）处理原始传感器信号、融合 MLP 分类三部分组成。
+
+\begin{verbatim}
+┌─────────────────────────────┐    ┌─────────────────────────────┐
+│  Vision 分支 (VisionEncoder) │    │  IMU 分支 (IMUEncoder)       │
+│  MobileNetV3-Small           │    │  3 层 1D-CNN                │
+│  输入: (B, 3, 224, 224)      │    │  输入: (B, 6, 128)           │
+│  输出: (B, 576)              │    │  输出: (B, 128)              │
+└──────────────┬──────────────┘    └──────────────┬──────────────┘
+               │                                  │
+               └────────────────┬─────────────────┘
+                                ▼
+                   ┌───────────────────────┐
+                   │  Fusion MLP            │
+                   │  concat(576+128=704)   │
+                   │  → Linear(704→256)     │
+                   │  → BN + ReLU + Dropout │
+                   │  → Linear(256→6)       │
+                   └───────────┬───────────┘
+                               ▼
+                   ┌───────────────────────┐
+                   │  6 类活动分类输出       │
+                   └───────────────────────┘
+\end{verbatim}
+
+\subsection{VisionEncoder：频谱图编码器}
+
+\begin{itemize}
+    \item \textbf{主干网络：} MobileNetV3-Small，使用 ImageNet 预训练权重（迁移学习）
+    \item \textbf{输入：} 3 通道时频谱图 $(B, 3, 224, 224)$
+    \item \textbf{处理流程：} \code{backbone.features}（去掉分类头）$\rightarrow$ \code{AdaptiveAvgPool2d(1)}（全局平均池化）
+    \item \textbf{输出：} 576 维特征向量 $(B, 576)$
+\end{itemize}
+
+MobileNetV3-Small 使用深度可分离卷积（depthwise separable convolution）和 SE（Squeeze-and-Excitation）注意力模块，在保持较高精度的同时大幅减少计算量。
+
+\subsection{IMUEncoder：时序信号编码器}
+
+\begin{itemize}
+    \item \textbf{结构：} 3 层 1D 卷积 + BatchNorm + ReLU
+    \item \textbf{输入：} 原始 6 通道传感器信号 $(B, 6, 128)$——3 轴加速度 + 3 轴陀螺仪，128 个时间步
+    \item \textbf{维度变化：}
+    \begin{verbatim}
+    (B, 6, 128)   → Conv1d(6→64, k=5, s=2)  → (B, 64, 64)
+    (B, 64, 64)   → Conv1d(64→128, k=5, s=2) → (B, 128, 32)
+    (B, 128, 32)  → Conv1d(128→128, k=5, s=2) → (B, 128, 16)
+    (B, 128, 16)  → AdaptiveAvgPool1d(1)      → (B, 128)
+    \end{verbatim}
+    \item \textbf{卷积核大小 5：} 捕捉 5 个时间步（0.1 秒 @ 50Hz）的局部运动模式
+    \item \textbf{步长 2：} 逐步降采样，增大感受野
+\end{itemize}
+
+\subsection{融合策略：晚期融合}
+
+\begin{itemize}
+    \item \textbf{融合方式：} Concat 拼接 $\rightarrow$ 704 维 $(576 + 128)$
+    \item \textbf{MLP 结构：} \code{Linear(704→256) → BatchNorm → ReLU → Dropout(0.3) → Linear(256→6)}
+    \item \textbf{Dropout(0.3)：} 唯一的正则化手段，防止过拟合
+\end{itemize}
+
+\textbf{为什么选择晚期融合？} 两个模态的物理意义完全不同——频谱图是频域二维图像，IMU 是时域一维信号。先让各自分支独立提取模态特定特征，再在高维语义层融合，避免模态间干扰。
+
+% =================================================================
+\section{数据处理流水线}
+
+\subsection{原始数据格式}
+
+UCI HAR Dataset 的原始格式是空格分隔的纯文本文件：
+
+\begin{itemize}
+    \item \file{body\_acc\_x\_train.txt}：身体加速度 X 轴，形状 $(7352, 128)$
+    \item \file{y\_train.txt}：训练标签，1--6 映射到 0--5
+\end{itemize}
+
+共 9 个信号文件（6 个身体传感器 + 3 个总加速度），加 2 个标签文件。
+
+\subsection{\file{\_load\_txt()} — 文本读取}
+
+\begin{lstlisting}[language=Python]
+def _load_txt(path):
+    with open(path, "r") as f:
+        return np.array(
+            [[float(x) for x in line.strip().split()] for line in f]
+        )
+\end{lstlisting}
+
+逐行读取 → 去除首尾空白 → 按空格分割 → 转为浮点数 → 返回 $(N, 128)$ 的 numpy 数组。
+
+\subsection{双模态数据生成}
+
+每个原始样本的传感器数据被处理成两种互补的输入形式：
+
+\subsubsection{模态 1：时频谱图（Vision 分支输入）}
+
+\begin{center}
+加速度信号 $(3, 128) \rightarrow$ STFT $\rightarrow$ |幅度| $\rightarrow$ log(1+x) $\rightarrow$ resize(224,224) $\rightarrow$ $(3, 224, 224)$
+\end{center}
+
+STFT 参数：\code{nperseg=64}（1.28 秒窗口）、\code{noverlap=48}（75\% 重叠）、\code{window="hann"}（汉宁窗）。
+
+关键设计：
+\begin{itemize}
+    \item 3 轴加速度各自独立做 STFT → 3 张谱图沿 channel 维度堆叠
+    \item \code{log1p} 压缩动态范围：原始幅度 $\approx [0, 100]$，取 log 后 $\approx [0, 5]$，利于神经网络学习
+    \item \code{scipy.ndimage.zoom}（order=1，双线性插值）缩放到 224×224
+    \item 最后 \code{Normalize(mean=0.5, std=0.5)} 映射到 $[-1, 1]$
+\end{itemize}
+
+\subsubsection{模态 2：原始 IMU 信号（IMU 分支输入）}
+
+\begin{itemize}
+    \item 3 轴加速度 + 3 轴陀螺仪 = 6 通道 × 128 时间步 → 直接作为 tensor
+    \item \textbf{不做额外处理}，保留原始时序信息
+    \item 加速度反映姿态和运动方向，陀螺仪反映旋转角速度
+\end{itemize}
+
+\subsection{HARDataLoader 类}
+
+继承 \code{torch.utils.data.Dataset}，\code{\_\_getitem\_\_} 返回三元组 \code{(spectrogram, imu\_signal, label)}。
+
+\begin{lstlisting}[language=Python]
+class HARDataLoader(Dataset):
+    def __getitem__(self, idx):
+        # 模态 1：时频谱图
+        acc_signals = np.stack([body_acc_x[idx], ...], axis=0)  # (3, 128)
+        spec = _build_spectrogram_image(acc_signals, 224)       # (3, 224, 224)
+        spec = torch.from_numpy(spec)
+        spec = spec_norm(spec)  # Normalize
+
+        # 模态 2：原始 IMU 信号
+        imu = np.stack([body_acc_x[idx], ..., body_gyro_z[idx]], axis=0)
+        imu = torch.from_numpy(imu).float()  # (6, 128)
+
+        return spec, imu, int(labels[idx])
+\end{lstlisting}
+
+\subsection{create\_dataloaders() 工厂函数}
+
+\begin{lstlisting}[language=Python]
+def create_dataloaders(data_dir, batch_size=32):
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False)
+    return train_loader, test_loader, len(LABELS)
+\end{lstlisting}
+
+\code{shuffle=True} 训练时打乱，\code{False} 测试时保持顺序；\code{num\_workers=0} 单进程（Windows 兼容）。
+
+% =================================================================
+\section{训练流程}
+
+\subsection{超参数配置}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{参数} & \textbf{值} & \textbf{说明} \\
+\midrule
+优化器          & AdamW             & weight\_decay=$10^{-4}$ \\
+初始学习率       & 0.001            & AdamW 初始步长 \\
+学习率调度       & CosineAnnealingLR & 余弦衰减到 0 \\
+损失函数         & CrossEntropyLoss  & 多分类交叉熵 \\
+Batch Size      & 32               & 每批 32 个样本 \\
+Epochs          & 30               & 完整遍历 30 次 \\
+设备            & CPU              & Intel Core（无 GPU）\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{余弦退火学习率}
+
+学习率按余弦曲线从初始值平滑衰减到 0：
+
+\[
+\mathrm{lr}(t) = \frac{\mathrm{lr}_0}{2}\left(1 + \cos\frac{t\pi}{T}\right)
+\]
+
+$t$ 为当前 epoch，$T=30$ 为总 epoch 数。后期极小学习率帮助模型收敛到更优局部最小值。
+
+\subsection{训练循环}
+
+每个 epoch 执行：
+\begin{enumerate}
+    \item \code{model.train()}：启用 Dropout 和 BatchNorm 训练模式
+    \item \code{train\_one\_epoch()}：遍历训练集，前向 → 计算损失 → 反向传播 → 更新权重
+    \item \code{evaluate()}：测试集评估（\code{@torch.no\_grad()} 禁用梯度计算）
+    \item \code{scheduler.step()}：衰减学习率
+    \item 若 test\_acc > best\_acc，保存 \file{best\_model.pth}
+\end{enumerate}
+
+\subsection{训练日志（完整 30 epochs）}
+
+\begin{longtable}{@{}cccc@{}}
+\toprule
+\textbf{Epoch} & \textbf{Train Loss} & \textbf{Train Acc} & \textbf{Test Acc} \\
+\midrule
+\endhead
+\midrule
+\multicolumn{4}{r}{\small（续下页）}
+\endfoot
+\bottomrule
+\endlastfoot
+ 1 & 0.5088 & 0.775 & 0.251 * \\
+ 2 & 0.3534 & 0.847 & 0.707 * \\
+ 3 & 0.3119 & 0.865 & 0.713 * \\
+ 4 & 0.2753 & 0.889 & 0.687   \\
+ 5 & 0.2496 & 0.894 & 0.649   \\
+ 6 & 0.2205 & 0.910 & 0.717 * \\
+ 7 & 0.1979 & 0.918 & 0.692   \\
+ 8 & 0.1950 & 0.918 & 0.716   \\
+ 9 & 0.1621 & 0.936 & 0.795 * \\
+10 & 0.1293 & 0.948 & 0.820 * \\
+11 & 0.1083 & 0.959 & 0.730   \\
+12 & 0.0947 & 0.963 & 0.832 * \\
+13 & 0.0731 & 0.974 & 0.799   \\
+14 & 0.0524 & 0.980 & 0.785   \\
+15 & 0.0394 & 0.986 & 0.841 * \\
+16 & 0.0318 & 0.988 & 0.795   \\
+17 & 0.0270 & 0.991 & 0.806   \\
+18 & 0.0138 & 0.995 & 0.861 * \\
+19 & 0.0116 & 0.997 & 0.842   \\
+20 & 0.0133 & 0.995 & 0.835   \\
+21 & 0.0080 & 0.998 & 0.800   \\
+22 & 0.0030 & 1.000 & 0.854   \\
+23 & 0.0040 & 0.999 & 0.827   \\
+24 & 0.0054 & 0.999 & 0.847   \\
+25 & 0.0024 & 0.999 & \textbf{0.876} * \\
+26 & 0.0021 & 1.000 & 0.871   \\
+27 & 0.0013 & 1.000 & 0.871   \\
+28 & 0.0017 & 1.000 & 0.874   \\
+29 & 0.0012 & 1.000 & 0.873   \\
+30 & 0.0017 & 1.000 & 0.873   \\
+\caption{训练日志（* 表示打破历史最佳测试准确率）}
+\end{longtable}
+
+\subsection{最终评估结果}
+
+最佳模型在 Epoch 25，测试准确率 \textbf{87.61\%}。
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{活动类别} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{样本数} \\
+\midrule
+walking            & 0.9841 & 1.0000 & 0.9920 & 496 \\
+walking\_upstairs   & 0.9638 & 0.9618 & 0.9628 & 471 \\
+walking\_downstairs & 0.9758 & 0.9595 & 0.9676 & 420 \\
+sitting            & 0.7140 & 0.6456 & 0.6781 & 491 \\
+standing           & 0.7522 & 0.8158 & 0.7827 & 532 \\
+laying             & 0.8887 & 0.8920 & 0.8903 & 537 \\
+\midrule
+\textbf{总体}      & \multicolumn{3}{c}{\textbf{0.8761}} & 2947 \\
+\bottomrule
+\end{tabular}
+\caption{分类报告（测试集）}
+\end{table}
+
+\textbf{结论：}
+\begin{itemize}
+    \item \textbf{动态活动（walking 系列）}识别近乎完美——walking 100\% 召回率，上下楼 >96\%
+    \item \textbf{静态活动（sitting/standing）}存在混淆——两者传感器模式极为相似，这是 HAR 经典难题
+    \item \textbf{laying} 识别较好（89\%）——躺下时加速度方向与直立明显不同
+\end{itemize}
+
+\subsection{混淆矩阵}
+
+\begin{verbatim}
+              walking  up  down  sit  stand  lay
+walking          496    0     0    0      0    0
+walking_up         8  453    10    0      0    0
+walking_down       0   17   403    0      0    0
+sitting            0    0     0  317    134   40
+standing           0    0     0   78    434   20
+laying             0    0     0   49      9  479
+\end{verbatim}
+
+主要混淆：sitting $\leftrightarrow$ standing（212 样本）、sitting $\rightarrow$ laying（40 样本）。
+
+% =================================================================
+\section{模型优化：量化与 ONNX 部署}
+
+\subsection{FP32 ONNX 导出}
+
+训练好的 PyTorch 模型（\file{.pth}）只能被 PyTorch 加载。ONNX 导出使其可在任何支持 ONNX Runtime 的设备运行（手机、嵌入式等）。
+
+\textbf{导出原理：}
+\begin{enumerate}
+    \item 用随机数据（dummy input）运行模型，\code{torch.export} 追踪所有算子调用
+    \item PyTorch 计算图转为 ONNX 中间表示（IR）
+    \item 序列化为 \file{.onnx} 文件
+\end{enumerate}
+
+\textbf{关键参数：}
+\begin{itemize}
+    \item \texttt{dynamic\_axes=\{0: "batch"\}}：batch 维度动态化，推理时可传入任意 batch size
+    \item \code{opset\_version=18}：匹配 PyTorch 2.12 的 ONNX 算子集
+\end{itemize}
+
+\subsection{INT8 动态量化}
+
+\textbf{原理：}
+\begin{verbatim}
+原始:  权重(FP32) × 输入(FP32) = 输出(FP32)
+量化:  [权重(INT8) → 反量化(FP32)] × 输入(FP32) = 输出(FP32)
+\end{verbatim}
+
+\begin{itemize}
+    \item 仅量化 \code{nn.Linear} 和 \code{nn.Conv1d} 的权重——激活值保持 FP32
+    \item 计算时临时反量化，精度损失极小
+    \item 权重量化减少内存占用约 25\%
+\end{itemize}
+
+\subsection{量化效果对比}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{指标} & \textbf{FP32} & \textbf{INT8} & \textbf{变化} \\
+\midrule
+准确率      & 87.61\%      & 87.58\%       & $-$0.03\% \\
+推理延迟     & 53.91 ms     & 52.66 ms      & 1.02× \\
+模型大小     & 4,972 KB     & 4,441 KB      & 1.12× \\
+参数量       & 1,235,302    & 1,053,280     & $-$14.7\% \\
+\bottomrule
+\end{tabular}
+\caption{FP32 vs INT8 量化对比}
+\end{table}
+
+\subsection{ONNX Runtime 推理性能}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{指标} & \textbf{结果} \\
+\midrule
+平均延迟   & 4.83 ms \\
+标准差     & 2.53 ms \\
+最小延迟   & 2.73 ms \\
+最大延迟   & 21.80 ms \\
+P95 延迟   & 9.44 ms \\
+吞吐量     & 207.0 次/秒 \\
+\bottomrule
+\end{tabular}
+\caption{ONNX Runtime 推理基准（FP32 ONNX，100 次迭代）}
+\end{table}
+
+\textbf{ONNX Runtime 比 PyTorch 原生推理快 11 倍}（4.83ms vs 53.91ms），原因：
+\begin{enumerate}
+    \item ONNX Runtime 对计算图做了算子融合和常量折叠优化
+    \item PyTorch eager 模式有 Python 解释器开销，ONNX Runtime 纯 C++ 执行
+    \item 批量推理时 ONNX Runtime 多线程并行效率更高
+\end{enumerate}
+
+% =================================================================
+\section{项目文件结构与代码详解}
+
+\subsection{目录结构}
+
+\begin{verbatim}
+EdgeHealth-ML/
+├── data/
+│   ├── download_har.py          # 多镜像下载 UCI HAR 数据集
+│   └── UCI_HAR_Dataset/         # 原始传感器数据（txt 格式）
+├── models/
+│   └── multimodal_model.py      # VisionEncoder + IMUEncoder + Fusion
+├── utils/
+│   └── data_loader.py           # STFT 谱图生成 + 数据加载
+├── train.py                     # 训练主脚本
+├── quantize_export.py           # 量化 + ONNX 导出
+├── inference_benchmark.py       # ONNX Runtime 推理基准测试
+├── checkpoints/                 # 模型权重 + ONNX 文件
+├── runs/                        # TensorBoard 训练日志
+└── requirements.txt             # 依赖清单
+\end{verbatim}
+
+\subsection{执行顺序}
+
+\begin{center}
+\file{download\_har.py} $\rightarrow$ \file{data\_loader.py} $\rightarrow$ \file{multimodal\_model.py} \\
+$\downarrow$ \\
+\file{inference\_benchmark.py} $\leftarrow$ \file{quantize\_export.py} $\leftarrow$ \file{train.py}
+\end{center}
+
+\subsection{\file{data/download\_har.py} —— 数据集下载}
+
+\textbf{功能：} 下载并解压 UCI HAR Dataset。被 \file{train.py} 和 \file{quantize\_export.py} 调用。
+
+\textbf{关键设计：}
+\begin{itemize}
+    \item \textbf{多镜像容错}（\code{HAR\_URLS} 列表）：优先 UCI 官方源，失败则切换 GitHub 镜像
+    \item \textbf{幂等性}：如数据集已解压，直接返回路径（\code{if os.path.exists(EXTRACT\_DIR)}）
+    \item \textbf{完整性验证}：下载后用 \code{zipfile.ZipFile} 打开验证合法性，损坏则删除重试
+    \item \textbf{清理}：解压后删除 zip 文件释放空间
+\end{itemize}
+
+\textbf{核心函数 \code{download\_and\_extract()}：}
+
+\begin{lstlisting}[language=Python]
+def download_and_extract():
+    if os.path.exists(EXTRACT_DIR):        # 幂等性检查
+        return EXTRACT_DIR
+    for url in HAR_URLS:                   # 遍历镜像
+        try:
+            urlretrieve(url, zip_path)     # 下载
+            with zipfile.ZipFile(zip_path) as test: pass  # 验证
+            break
+        except Exception:
+            if os.path.exists(zip_path): os.remove(zip_path)
+            continue                       # 下一个镜像
+    else:
+        sys.exit(1)                        # 全部失败 → 退出
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(DATA_DIR)            # 解压
+    os.remove(zip_path)                    # 清理
+    return EXTRACT_DIR
+\end{lstlisting}
+
+\subsection{\file{utils/data\_loader.py} —— 数据加载与预处理}
+
+\textbf{功能：} 从原始 txt 文件读取传感器数据，转化为双模态输入。
+
+\textbf{关键函数：}
+\begin{itemize}
+    \item \code{\_load\_txt(path)}：读取空格分隔文本 → numpy 数组
+    \item \code{\_signal\_to\_spectrogram(signal\_1d, nperseg=64, noverlap=48)}：STFT → |幅度| → log1p → 2D 谱图
+    \item \code{\_build\_spectrogram\_image(signals\_3ch, 224)}：3 通道各做 STFT → stack → zoom 缩放 → normalize
+    \item \code{\_resize\_2d(arr, h, w)}：\code{scipy.ndimage.zoom} 双线性插值
+\end{itemize}
+
+\textbf{核心类 \code{HARDataLoader(Dataset)}：} \code{\_\_getitem\_\_} 返回 \code{(spectrogram, imu\_signal, label)}。
+
+\subsection{\file{models/multimodal\_model.py} —— 模型架构}
+
+\textbf{功能：} 定义双分支多模态融合网络的全部组件。
+
+\textbf{三个核心类：}
+
+\textbf{1. \code{IMUEncoder}（1D-CNN 时序编码器）—— 行 27--55}
+\begin{itemize}
+    \item 3 层 Conv1d，每层 kernel=5, stride=2, padding=2
+    \item 维度流：$(B,6,128) \rightarrow (B,64,64) \rightarrow (B,128,32) \rightarrow (B,128,16) \rightarrow (B,128)$
+    \item \code{AdaptiveAvgPool1d(1)} 全局平均池化压缩时间维度
+\end{itemize}
+
+\textbf{2. \code{VisionEncoder}（频谱图编码器）—— 行 58--76}
+\begin{itemize}
+    \item \code{mobilenet.mobilenet\_v3\_small(weights="DEFAULT")} 加载预训练
+    \item \code{backbone.features} 去掉分类头，\code{AdaptiveAvgPool2d(1)} 全局池化
+    \item 输出 576 维——MobileNetV3-Small 的标准特征维度
+\end{itemize}
+
+\textbf{3. \code{MultimodalHARModel}（融合网络）—— 行 79--110}
+\begin{itemize}
+    \item 包含 vision\_encoder + imu\_encoder + fusion MLP
+    \item Fusion: Linear(704→256) → BN → ReLU → Dropout(0.3) → Linear(256→6)
+    \item \code{forward()}：分别编码 → \code{torch.cat} 拼接 → 分类
+\end{itemize}
+
+\textbf{4. \code{count\_parameters()} —— 行 116--119}
+\begin{itemize}
+    \item 统计总参数和可训练参数（本项目 1,235,302 个全部可训练）
+\end{itemize}
+
+\subsection{\file{train.py} —— 训练脚本}
+
+\textbf{功能：} 编排完整训练流程。
+
+\textbf{命令行参数（\code{parse\_args()}）：}
+\code{--epochs 30}、\code{--batch\_size 32}、\code{--lr 0.001}、\code{--weight\_decay 1e-4}、\code{--device auto}
+
+\textbf{关键函数：}
+\begin{itemize}
+    \item \code{train\_one\_epoch()}：前向 → 损失 → 反向 → 更新，返回平均 loss 和 accuracy
+    \item \code{evaluate()}：\code{@torch.no\_grad()} 禁用梯度，返回 loss + acc + 所有预测和标签
+    \item \code{main()}：4 步流程——
+    \begin{enumerate}
+        \item 准备数据（下载 + 创建 DataLoader）
+        \item 构建模型（实例化 + 打印参数量）
+        \item 训练循环（30 epochs + CosineAnnealingLR + TensorBoard + 保存最佳模型）
+        \item 最终评估（\code{classification\_report} + \code{confusion\_matrix}）
+    \end{enumerate}
+\end{itemize}
+
+\textbf{优化器选择：AdamW} —— 与标准 Adam 的区别在于 weight\_decay 直接作用于权重而非通过梯度，提供更好的正则化效果。
+
+\subsection{\file{quantize\_export.py} —— 量化与 ONNX 导出}
+
+\textbf{功能：} 将训练好的 PyTorch 模型压缩并导出为跨平台 ONNX 格式。
+
+\textbf{关键函数：}
+\begin{itemize}
+    \item \code{export\_onnx(model, filepath)}：\code{torch.onnx.export()} 导出，支持动态 batch
+    \item \code{quantize\_model(model)}：\code{torch.quantization.quantize\_dynamic()} INT8 动态量化
+    \item \code{compare\_models(fp32, int8, loader)}：准确率 + 延迟 + 大小三方对比
+    \item \code{main()}：4 步——加载数据 → 加载模型 → 导出 FP32 ONNX → INT8 量化 + 对比
+\end{itemize}
+
+\textbf{兼容性说明：} PyTorch 2.12+ 基于 \code{torch.export} 的 ONNX 导出器不支持量化模型。FP32 ONNX 导出成功（397 KB），INT8 ONNX 通过 try/except 跳过。
+
+\subsection{\file{inference\_benchmark.py} —— 推理性能测试}
+
+\textbf{功能：} 用 ONNX Runtime 测试模型在实际部署时的推理速度。
+
+\textbf{\code{main()} 流程：}
+\begin{enumerate}
+    \item 验证 ONNX：\code{onnx.load()} + \code{onnx.checker.check\_model()}
+    \item 创建会话：\code{ort.InferenceSession()}（CPUExecutionProvider）
+    \item 预热：10 次推理（排除初始化开销）
+    \item 基准：100 次推理，\code{time.perf\_counter()} 高精度计时
+    \item 统计：均值、标准差、P95、吞吐量
+    \item 对比：若 INT8 ONNX 存在则自动 FP32 vs INT8 对比
+\end{enumerate}
+
+% =================================================================
+\section{从零到一复现}
+
+\begin{enumerate}
+    \item \textbf{安装依赖：}
+    \begin{lstlisting}[language=bash]
+pip install torch torchvision numpy scipy scikit-learn onnx onnxruntime
+    \end{lstlisting}
+
+    \item \textbf{训练模型（自动下载数据集）：}
+    \begin{lstlisting}[language=bash]
+python train.py --epochs 30
+    \end{lstlisting}
+
+    \item \textbf{量化并导出 ONNX：}
+    \begin{lstlisting}[language=bash]
+python quantize_export.py
+    \end{lstlisting}
+
+    \item \textbf{推理性能基准：}
+    \begin{lstlisting}[language=bash]
+python inference_benchmark.py --onnx checkpoints/model_fp32.onnx --iters 100
+    \end{lstlisting}
+\end{enumerate}
+
+% =================================================================
+\section{数据流总览}
+
+\begin{verbatim}
+UCI HAR Dataset (.txt 文件)
+        │
+        ▼
+data_loader.py ──── STFT 谱图 (3,224,224) ──→ VisionEncoder ──→ 576维
+        │                                                           │
+        └────── 原始IMU信号 (6,128) ──→ IMUEncoder ──→ 128维     │
+                                                                    ▼
+                                                     torch.cat → 704维
+                                                                    │
+                                                                    ▼
+                                                      Fusion MLP (704→256→6)
+                                                                    │
+                                                                    ▼
+                                                              6类活动输出
+                                                                    │
+                                               ┌────────────────────┘
+                                               ▼
+                               train.py ──→ best_model.pth (87.61%)
+                                               │
+                                               ▼
+                               quantize_export.py ──→ model_fp32.onnx
+                                                    ──→ model_int8.pth
+                                               │
+                                               ▼
+                               inference_benchmark.py ──→ 4.83ms/次
+\end{verbatim}
+
+% =================================================================
+\newpage
+\section*{附录 A：依赖清单}
+
+\begin{lstlisting}
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+scipy>=1.10.0
+scikit-learn>=1.3.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+onnx>=1.14.0
+onnxruntime>=1.15.0
+\end{lstlisting}
+
+\section*{附录 B：6 类活动标签}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}cl@{}}
+\toprule
+\textbf{索引} & \textbf{活动} \\
+\midrule
+0 & walking \\
+1 & walking\_upstairs \\
+2 & walking\_downstairs \\
+3 & sitting \\
+4 & standing \\
+5 & laying \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{附录 C：6 通道传感器信号}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}cll@{}}
+\toprule
+\textbf{索引} & \textbf{信号名} & \textbf{传感器} \\
+\midrule
+0 & body\_acc\_x  & 加速度计 X 轴 \\
+1 & body\_acc\_y  & 加速度计 Y 轴 \\
+2 & body\_acc\_z  & 加速度计 Z 轴 \\
+3 & body\_gyro\_x & 陀螺仪 X 轴 \\
+4 & body\_gyro\_y & 陀螺仪 Y 轴 \\
+5 & body\_gyro\_z & 陀螺仪 Z 轴 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

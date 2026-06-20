@@ -1,0 +1,25 @@
+{
+  "name": "edgehealth-ios",
+  "version": "1.0.0",
+  "description": "Real-time Human Activity Recognition on iPhone",
+  "main": "App.js",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo start --ios",
+    "build:ios": "eas build --platform ios --profile production"
+  },
+  "dependencies": {
+    "expo": "~52.0.0",
+    "expo-asset": "~11.0.0",
+    "expo-file-system": "~18.0.0",
+    "expo-sensors": "~14.0.0",
+    "expo-status-bar": "~2.0.0",
+    "react": "18.3.1",
+    "react-native": "0.76.6",
+    "react-native-webview": "13.12.5"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0"
+  },
+  "private": true
+}

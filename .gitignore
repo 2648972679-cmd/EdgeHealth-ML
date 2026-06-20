@@ -8,7 +8,8 @@ build/
 
 # Model checkpoints (too large, keep local only)
 checkpoints/*.pth
-checkpoints/*.onnx
+checkpoints/model_fp32.onnx
+checkpoints/model_int8.onnx
 checkpoints/*.onnx.data
 
 # Dataset (too large, auto-downloaded)
@@ -42,3 +43,14 @@ report/*.aux
 report/*.log
 report/*.out
 report/*.synctex*
+
+# Expo / React Native
+ios-app/node_modules/
+ios-app/.expo/
+ios-app/dist/
+ios-app/*.jks
+ios-app/*.p8
+ios-app/*.p12
+ios-app/*.key
+ios-app/*.mobileprovision
+ios-app/*.orig.*

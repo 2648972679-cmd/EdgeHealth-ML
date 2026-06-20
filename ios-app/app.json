@@ -1,0 +1,25 @@
+{
+  "expo": {
+    "name": "EdgeHealth",
+    "slug": "edgehealth",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.edgehealth.har",
+      "infoPlist": {
+        "NSMotionUsageDescription": "We use your phone's motion sensors to detect your current activity (walking, sitting, etc.) in real time."
+      }
+    },
+    "plugins": [
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow EdgeHealth to access your motion sensors for activity recognition."
+        }
+      ]
+    ]
+  }
+}

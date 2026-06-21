@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0D1117">
+  <link rel="manifest" href="manifest.json">
+  <title>EdgeHealth</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0D1117;color:#fff;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:20px}
+    .status{font-size:13px;color:#8B949E;margin-bottom:16px}
+    .status.live{color:#4CAF50}
+    .card{border:3px solid #888;border-radius:24px;padding:36px 24px;text-align:center;background:#161B22;width:100%;max-width:360px;margin:12px 0;transition:border-color .3s,box-shadow .3s}
+    .card.active{box-shadow:0 0 40px rgba(76,175,80,.2)}
+    .emoji{font-size:64px;margin-bottom:8px}
+    .name{font-size:28px;font-weight:800;margin-bottom:4px}
+    .conf{font-size:14px;color:#8B949E}
+    .bars{width:100%;max-width:360px;margin:12px 0}
+    .row{display:flex;align-items:center;margin:8px 0;font-size:12px}
+    .row .icon{width:28px;text-align:center;margin-right:4px}
+    .row .label{width:90px;color:#C9D1D9}
+    .track{flex:1;height:14px;background:#21262D;border-radius:7px;overflow:hidden;margin:0 8px}
+    .fill{height:100%;border-radius:7px;transition:width .3s}
+    .pct{width:36px;text-align:right;color:#8B949E}
+    .btn{padding:12px 32px;border-radius:12px;border:none;font-size:16px;font-weight:600;cursor:pointer;margin:12px 0}
+    .btn.start{background:#238636;color:#fff}
+    .btn.stop{background:#DA3633;color:#fff}
+    .btn:disabled{opacity:.4}
+    .footer{margin-top:auto;padding:20px;font-size:11px;color:#484F58}
+  </style>
+</head>
+<body>
+
+  <div style="margin-top:24px;font-size:22px;font-weight:700">EdgeHealth</div>
+  <div class="status" id="status">Loading model...</div>
+
+  <!-- Activity card -->
+  <div class="card" id="card">
+    <div class="emoji" id="emoji">⏳</div>
+    <div class="name" id="activityName">Initializing...</div>
+    <div class="conf" id="confidence"></div>
+  </div>
+
+  <!-- Start/Stop button -->
+  <button class="btn start" id="btn" disabled onclick="toggle()">Start</button>
+
+  <!-- Confidence bars -->
+  <div class="bars" id="bars"></div>
+
+  <div class="footer">EdgeHealth · On-Device AI · No data leaves your phone</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.js"></script>
+  <script>
+    // ─── Constants ──────────────────────────────────────────
+    const ACTIVITIES = [
+      { name: 'Walking',             emoji: '🚶', color: '#4CAF50' },
+      { name: 'Walking Upstairs',    emoji: '🏃', color: '#FF9800' },
+      { name: 'Walking Downstairs',  emoji: '🏃', color: '#F44336' },
+      { name: 'Sitting',             emoji: '🪑', color: '#2196F3' },
+      { name: 'Standing',            emoji: '🧍', color: '#9C27B0' },
+      { name: 'Laying',              emoji: '🛌', color: '#607D8B' },
+    ];
+    const WINDOW = 128;
+
+    // ─── State ──────────────────────────────────────────────
+    let session = null;
+    let running = false;
+    let accBuf = [[], [], []];  // x, y, z arrays
+    let gyrBuf = [[], [], []];  // alpha, beta, gamma arrays
+    let lastInfer = 0;
+
+    // ─── DOM refs ───────────────────────────────────────────
+    const $status = document.getElementById('status');
+    const $card = document.getElementById('card');
+    const $emoji = document.getElementById('emoji');
+    const $name = document.getElementById('activityName');
+    const $conf = document.getElementById('confidence');
+    const $btn = document.getElementById('btn');
+    const $bars = document.getElementById('bars');
+
+    // ─── Build bar UI ───────────────────────────────────────
+    ACTIVITIES.forEach((a, i) => {
+      const r = document.createElement('div'); r.className = 'row';
+      r.innerHTML = `<span class="icon">${a.emoji}</span><span class="label">${a.name}</span><div class="track"><div class="fill" id="fill${i}" style="width:0%;background:${a.color}"></div></div><span class="pct" id="pct${i}">0%</span>`;
+      $bars.appendChild(r);
+    });
+
+    // ─── Load ONNX model ────────────────────────────────────
+    async function loadModel() {
+      try {
+        $status.textContent = 'Downloading model (398 KB)...';
+        const resp = await fetch('ios_model.onnx');
+        const buf = await resp.arrayBuffer();
+        $status.textContent = 'Loading ONNX Runtime...';
+        session = await ort.InferenceSession.create(buf);
+        $status.textContent = 'Model ready. Tap Start to begin.';
+        $status.classList.add('live');
+        $btn.disabled = false;
+      } catch (e) {
+        $status.textContent = 'Error: ' + e.message;
+        console.error(e);
+      }
+    }
+
+    // ─── Sensor permission ──────────────────────────────────
+    async function requestPermission() {
+      // iOS 13+ requires requestPermission for DeviceMotionEvent
+      if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        try {
+          const resp = await DeviceMotionEvent.requestPermission();
+          if (resp !== 'granted') throw new Error('Permission denied');
+        } catch (e) {
+          $status.textContent = 'Sensor permission denied. Please allow motion access in Settings.';
+          throw e;
+        }
+      }
+    }
+
+    // ─── Inference ──────────────────────────────────────────
+    async function infer() {
+      const minLen = Math.min(
+        accBuf[0].length, accBuf[1].length, accBuf[2].length,
+        gyrBuf[0].length, gyrBuf[1].length, gyrBuf[2].length
+      );
+      if (minLen < WINDOW) return;
+
+      // Build flat input: [acc_x*128, acc_y*128, acc_z*128, gyr_a*128, gyr_b*128, gyr_g*128]
+      const flat = new Float32Array(6 * WINDOW);
+      const srcs = [...accBuf, ...gyrBuf];
+      for (let c = 0; c < 6; c++) {
+        const arr = srcs[c].slice(0, WINDOW);
+        flat.set(arr, c * WINDOW);
+      }
+
+      // ONNX inference
+      const tensor = new ort.Tensor('float32', flat, [1, 6, WINDOW]);
+      const outputs = await session.run({ imu_signal: tensor });
+      const logits = Array.from(outputs.logits.data);
+
+      // Softmax
+      const max = Math.max(...logits);
+      const exps = logits.map(v => Math.exp(v - max));
+      const sum = exps.reduce((a, b) => a + b, 0);
+      const probs = exps.map(v => v / sum);
+
+      // Update UI
+      const top = probs.indexOf(Math.max(...probs));
+      const act = ACTIVITIES[top];
+      $emoji.textContent = act.emoji;
+      $name.textContent = act.name;
+      $name.style.color = act.color;
+      $conf.textContent = (probs[top] * 100).toFixed(1) + '% confidence';
+      $card.style.borderColor = act.color;
+      $card.classList.add('active');
+
+      // Update bars
+      probs.forEach((p, i) => {
+        document.getElementById('fill' + i).style.width = (p * 100).toFixed(0) + '%';
+        document.getElementById('pct' + i).textContent = (p * 100).toFixed(0) + '%';
+      });
+
+      // Slide window: keep last 16 samples
+      const keep = 16;
+      accBuf = accBuf.map(a => a.slice(-keep));
+      gyrBuf = gyrBuf.map(g => g.slice(-keep));
+      lastInfer = Date.now();
+    }
+
+    // ─── Motion handler ─────────────────────────────────────
+    function onMotion(event) {
+      if (!running) return;
+      const a = event.acceleration || { x: 0, y: 0, z: 0 };
+      const g = event.rotationRate || { alpha: 0, beta: 0, gamma: 0 };
+      accBuf[0].push(a.x || 0);
+      accBuf[1].push(a.y || 0);
+      accBuf[2].push(a.z || 0);
+      gyrBuf[0].push(g.alpha || 0);
+      gyrBuf[1].push(g.beta || 0);
+      gyrBuf[2].push(g.gamma || 0);
+
+      // Throttle inference to ~4 times/sec
+      if (Date.now() - lastInfer > 250) infer();
+    }
+
+    // ─── Toggle ─────────────────────────────────────────────
+    async function toggle() {
+      if (running) {
+        running = false;
+        window.removeEventListener('devicemotion', onMotion);
+        $btn.textContent = 'Start';
+        $btn.className = 'btn start';
+        $status.textContent = 'Stopped';
+        $status.classList.remove('live');
+        accBuf = [[], [], []];
+        gyrBuf = [[], [], []];
+      } else {
+        await requestPermission();
+        running = true;
+        window.addEventListener('devicemotion', onMotion);
+        $btn.textContent = 'Stop';
+        $btn.className = 'btn stop';
+        $status.textContent = 'Live — detecting activity...';
+        $status.classList.add('live');
+      }
+    }
+
+    // ─── Startup ────────────────────────────────────────────
+    loadModel();
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>

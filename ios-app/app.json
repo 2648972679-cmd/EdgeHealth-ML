@@ -6,11 +6,15 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
+    "cli": {
+      "appVersionSource": "local"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.edgehealth.har",
       "infoPlist": {
-        "NSMotionUsageDescription": "We use your phone's motion sensors to detect your current activity (walking, sitting, etc.) in real time."
+        "NSMotionUsageDescription": "We use your phone's motion sensors to detect your current activity (walking, sitting, etc.) in real time.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "plugins": [
@@ -20,6 +24,12 @@
           "motionPermission": "Allow EdgeHealth to access your motion sensors for activity recognition."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3795ef59-9408-4a0a-9d19-77e608a69363"
+      }
+    },
+    "owner": "wujinjun"
   }
 }

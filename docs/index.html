@@ -174,12 +174,18 @@
       if (!running) return;
       const a = event.acceleration || { x: 0, y: 0, z: 0 };
       const g = event.rotationRate || { alpha: 0, beta: 0, gamma: 0 };
-      accBuf[0].push(a.x || 0);
-      accBuf[1].push(a.y || 0);
-      accBuf[2].push(a.z || 0);
-      gyrBuf[0].push(g.alpha || 0);
-      gyrBuf[1].push(g.beta || 0);
-      gyrBuf[2].push(g.gamma || 0);
+
+      // Fix: UCI HAR uses body coordinate system:
+      //   acc_x, acc_y, acc_z = raw accelerometer axes
+      //   gyro_x = rotation around X = beta, gyro_y = rotation around Y = gamma,
+      //   gyro_z = rotation around Z = alpha
+      // Also normalize: UCI HAR values are roughly in [-2, 2] range for acc, [-3, 3] for gyro
+      accBuf[0].push((a.x || 0) / 9.81);   // m/s2 -> g-force (like UCI HAR)
+      accBuf[1].push((a.y || 0) / 9.81);
+      accBuf[2].push((a.z || 0) / 9.81);
+      gyrBuf[0].push(g.beta || 0);    // rotation around X axis
+      gyrBuf[1].push(g.gamma || 0);   // rotation around Y axis
+      gyrBuf[2].push(g.alpha || 0);   // rotation around Z axis
 
       // Throttle inference to ~4 times/sec
       if (Date.now() - lastInfer > 250) infer();
